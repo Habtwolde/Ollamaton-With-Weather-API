@@ -1,20 +1,21 @@
-# Ollamaton - Ollama MCP Client
+# An interactive Ollama + MCP client that connects LLMs to external tools — fetch real-time weather data and log conversations into PostgreSQL via MCP servers.
 
-A universal client that connects Ollama with any MCP (Model Context Protocol) servers, allowing you to extend your local AI with powerful tools and resources.
+An interactive Ollama + MCP client that connects LLMs to external tools.
+
+## This project demonstrates how to:
+
+- 🦙 Run Ollama models (e.g., llama3:latest) in interactive chat mode.
+- 🔧 Use Model Context Protocol (MCP) servers to extend LLM capabilities.
+- 🌤️ Query real-time weather data via a Weather MCP server.
+- 🗄️ Log conversations into a Postgres database with a pg_log MCP server.
+- 💻 Explore via CLI commands (chat, test, server, gui) for flexibility.
 
 ## Features
 
-- 🔧 **Universal MCP Support**: Connect to any MCP server
-- 🤖 **Ollama Integration**: Works with any Ollama model
-- 📝 **Editable Instructions**: Customize system prompts and behavior
-- 🌐 **Multiple Interfaces**: CLI, HTTP API, and Web GUI
-- 🔄 **Auto-discovery**: Automatically finds and loads Claude Desktop configs
-- 📊 **Tool Management**: List, test, and manage MCP tools
-- 💬 **Interactive Chat**: Real-time conversation with tool integration
-
-## Screenshot
-
-![Ollamaton Web Interface](ollamaton_screenshot.png)
+- Chat with Llama3 while seamlessly invoking MCP tools.
+- Save chat history directly into Postgres (chat_log table).
+- Test and list all connected MCP servers and tools.
+- Extendable config (mcp_config.json) for adding your own servers.
 
 *Ollamaton's web interface showing the chat interface with MCP tool integration, settings modal, and responsive design.*
 
