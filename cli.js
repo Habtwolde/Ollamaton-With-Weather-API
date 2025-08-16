@@ -5,6 +5,69 @@ import { MCPManager } from './mcp_client.js';
 import { OllamaWithMCP } from './ollama_integration.js';
 import readline from 'readline';
 
+// Helper to parse "server.tool" into { serverId, toolName }
+function parseQualifiedTool(input) {
+  const parts = input.split('.');
+  if (parts.length !== 2) throw new Error('Use server.tool format, e.g., pg_log.log_chat');
+  const [serverId, toolName] = parts;
+  return { serverId, toolName };
+}
+
+// Try multiple call styles against MCPManager
+async function callToolSmart(mcpManager, serverId, toolName, args) {
+  // 1) If a 3-arg variant exists, try that first
+  if (mcpManager?.callTool && mcpManager.callTool.length >= 3) {
+    try {
+      return await mcpManager.callTool(serverId, toolName, args);
+    } catch (e) {
+      // fall through
+    }
+  }
+
+  // 2) Try qualified with dot
+  if (mcpManager?.callTool) {
+    try {
+      return await mcpManager.callTool(`${serverId}.${toolName}`, args);
+    } catch (e) {
+      // fall through
+    }
+  }
+
+  // 3) Try qualified with colon
+  if (mcpManager?.callTool) {
+    try {
+      return await mcpManager.callTool(`${serverId}:${toolName}`, args);
+    } catch (e) {
+      // fall through
+    }
+  }
+
+  // 4) Try bare tool name
+  if (mcpManager?.callTool) {
+    try {
+      return await mcpManager.callTool(toolName, args);
+    } catch (e) {
+      // fall through
+    }
+  }
+
+  // 5) As a last resort, poke the raw client (if exposed)
+  const pgLogClient =
+    mcpManager?.getServer?.(serverId) ||
+    mcpManager?.getClient?.(serverId) ||
+    mcpManager?.servers?.get?.(serverId) ||
+    mcpManager?.servers?.[serverId];
+
+  if (pgLogClient?.callTool) {
+    return await pgLogClient.callTool(toolName, args);
+  }
+  if (pgLogClient?.request) {
+    return await pgLogClient.request('tools/call', { name: toolName, arguments: args });
+  }
+
+  throw new Error(`Could not call tool; unsupported MCPManager/client shape for '${serverId}.${toolName}'`);
+}
+
 class OllamaMCPCLI {
   constructor() {
     this.configManager = new ConfigManager();
@@ -63,17 +126,16 @@ Commands:
   gui                     Start web GUI
   help                    Show this help message
 
+Chat mode shortcuts:
+  tools                   List available tools
+  clear                   Clear conversation history
+  exit                    Quit chat
+  tool <server.tool> <jsonArgs>
+                          Call a tool directly. Example:
+                          tool pg_log.log_chat {"user_text":"Hi","assistant_text":"Hello"}
+
 Options:
   --config=<path>         Use specific config file
-
-Examples:
-  node cli.js init
-  node cli.js config show
-  node cli.js config add-server filesystem
-  node cli.js test --config=./my-config.json
-  node cli.js chat
-  node cli.js server
-  node cli.js gui
 `);
   }
 
@@ -85,11 +147,7 @@ Examples:
     console.log('📋 Default configuration:');
     console.log(JSON.stringify(defaultConfig, null, 2));
 
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout
-    });
-
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     const question = (prompt) => new Promise(resolve => rl.question(prompt, resolve));
 
     try {
@@ -170,11 +228,7 @@ Examples:
       return;
     }
 
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout
-    });
-
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     const question = (prompt) => new Promise(resolve => rl.question(prompt, resolve));
 
     try {
@@ -195,11 +249,7 @@ Examples:
         env[envName] = envValue;
       }
 
-      const serverConfig = {
-        command,
-        args,
-        env
-      };
+      const serverConfig = { command, args, env };
 
       console.log('\n📋 Server configuration:');
       console.log(JSON.stringify(serverConfig, null, 2));
@@ -219,11 +269,7 @@ Examples:
   }
 
   async editInstructions() {
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout
-    });
-
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     const question = (prompt) => new Promise(resolve => rl.question(prompt, resolve));
 
     try {
@@ -292,41 +338,14 @@ Examples:
     await this.mcpManager.close();
   }
 
-  // === NEW HELPER ===
+  // Use the smart helper so we cover all name/arg shapes
   async forceLogChat(userText, assistantText) {
     if (!userText || !assistantText) return;
-    try {
-      if (this.mcpManager?.callTool) {
-        await this.mcpManager.callTool('pg_log', 'log_chat', {
-          user_text: userText,
-          assistant_text: assistantText
-        });
-        console.log(`🗄️  DB log via MCP: OK`);
-        return;
-      }
-      const pgLogClient =
-        this.mcpManager?.getServer?.('pg_log') ||
-        this.mcpManager?.getClient?.('pg_log') ||
-        this.mcpManager?.servers?.get?.('pg_log') ||
-        this.mcpManager?.servers?.['pg_log'];
 
-      if (pgLogClient?.callTool) {
-        await pgLogClient.callTool('log_chat', {
-          user_text: userText,
-          assistant_text: assistantText
-        });
-        console.log(`🗄️  DB log via MCP: OK`);
-        return;
-      }
-      if (pgLogClient?.request) {
-        await pgLogClient.request('tools/call', {
-          name: 'log_chat',
-          arguments: { user_text: userText, assistant_text: assistantText }
-        });
-        console.log(`🗄️  DB log via MCP: OK`);
-        return;
-      }
-      console.warn('⚠️  pg_log MCP client not found or unsupported interface.');
+    const args = { user_text: userText, assistant_text: assistantText };
+    try {
+      await callToolSmart(this.mcpManager, 'pg_log', 'log_chat', args);
+      console.log('🗄️  DB log via MCP: OK');
     } catch (err) {
       console.warn('⚠️  log_chat failed:', err?.message || err);
     }
@@ -343,14 +362,10 @@ Examples:
 
     this.ollamaClient = new OllamaWithMCP(this.mcpManager, this.configManager);
 
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout
-    });
-
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     const question = (prompt) => new Promise(resolve => rl.question(prompt, resolve));
 
-    console.log('💡 Type "exit" to quit, "tools" to list tools, "clear" to clear history');
+    console.log('💡 Type "exit" to quit, "tools" to list tools, "clear" to clear history, or use "tool <server.tool> <jsonArgs>"');
 
     while (true) {
       try {
@@ -369,6 +384,24 @@ Examples:
           continue;
         }
 
+        // Direct tool runner (e.g., "tool pg_log.log_chat {\"user_text\":\"Hi\",\"assistant_text\":\"Hello\"}")
+        if (input.startsWith('tool ')) {
+          const rest = input.slice('tool '.length).trim();
+          const spaceIdx = rest.indexOf(' ');
+          const qname = spaceIdx === -1 ? rest : rest.slice(0, spaceIdx);
+          const argsText = spaceIdx === -1 ? '{}' : rest.slice(spaceIdx + 1);
+
+          try {
+            const { serverId, toolName } = parseQualifiedTool(qname);
+            const argsObj = argsText ? JSON.parse(argsText) : {};
+            const res = await callToolSmart(this.mcpManager, serverId, toolName, argsObj);
+            console.log('✅ Tool result:', res);
+          } catch (e) {
+            console.error('❌ Tool call failed:', e?.message || e);
+          }
+          continue;
+        }
+
         console.log('🤖 Thinking...');
         const result = await this.ollamaClient.chat(input);
 
@@ -383,7 +416,7 @@ Examples:
           console.log('💭 Response:', result.response);
         }
 
-        // NEW: always log to DB
+        // Always log to DB (best-effort)
         await this.forceLogChat(input, assistantText);
 
       } catch (error) {
