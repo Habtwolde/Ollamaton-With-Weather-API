@@ -1,0 +1,24 @@
+Run: ollama serve
+In another terminal: node servers/weather/index.js
+In another terminal: node cli.js chat
+
+
+for connecting to the PostgreSQL
+
+PS C:\Users\dell> & "C:\Program Files\PostgreSQL\17\bin\psql.exe" -U postgres -h localhost
+Password for user postgres: postgres
+
+postgres=# -- 1-a.  new database just for chat logs
+postgres=# CREATE DATABASE chatdb;
+CREATE DATABASE
+postgres=#
+postgres=# -- 1-b.  application user (choose any strong password)
+postgres=# CREATE ROLE chatuser WITH LOGIN PASSWORD 'Secr3t!';
+CREATE ROLE
+postgres=#
+postgres=# -- 1-c.  grant that user full rights on chatdb only
+postgres=# GRANT ALL PRIVILEGES ON DATABASE chatdb TO chatuser;
+GRANT
+postgres=# \q
+PS C:\Users\dell> & "C:\Program Files\PostgreSQL\17\bin\psql.exe" -U chatuser -d chatdb -h localhost -W
+Password: Secr3t!

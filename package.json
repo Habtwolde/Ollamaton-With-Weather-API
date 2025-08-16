@@ -1,0 +1,10 @@
+{
+  "name": "weather",
+  "version": "1.0.0",
+  "description": "MCP server that fetches live weather data",
+  "type": "module",
+  "main": "index.js",
+  "dependencies": {
+    "zod": "^3.23.8"
+  }
+}
