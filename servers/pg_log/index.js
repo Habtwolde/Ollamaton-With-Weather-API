@@ -1,56 +1,47 @@
 // servers/pg_log/index.js
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { z } from "zod";
-import pg from "pg";
+import pkg from "pg";
+const { Pool } = pkg;
 
-/* ───────────────────────────────────────────────
-   PostgreSQL pool – credentials come from env vars:
-   PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD
-   ─────────────────────────────────────────────── */
-const pool = new pg.Pool({
-  host: "localhost",
-  port: 5432,
-  database: "chatdb",
-  user: "chatuser",
-  password: "ChatPass123!"
+const server = new McpServer({ name: "pg_log", version: "1.0.0" });
+
+// Set via env or default localhost dev
+const pool = new Pool({
+  host: process.env.PGHOST ?? "localhost",
+  port: +(process.env.PGPORT ?? 5432),
+  user: process.env.PGUSER ?? "chatuser",
+  password: process.env.PGPASSWORD ?? "",
+  database: process.env.PGDATABASE ?? "chatdb",
 });
 
-/* ───────────────────────────────────────────────
-   Create the MCP server
-   ─────────────────────────────────────────────── */
-const srv = new McpServer({ name: "pg_log", version: "1.0.0" });
-
-/* ───────────────────────────────────────────────
-   Register the logging tool
-   ─────────────────────────────────────────────── */
-srv.registerTool(
+server.registerTool(
   "log_chat",
   {
-    title: "Log chat",
-    description: "Insert a user/assistant pair into public.chat_log",
-    inputSchema: {
-      user_text:      z.string(),
-      assistant_text: z.string()
-    }
+    title: "Insert a user/assistant pair into public.chat_log",
+    description: "Writes a row (user_text, assistant_text) to chat_log",
+    // no inputSchema – keep it permissive
   },
-  async ({ user_text, assistant_text }) => {
-    try {
-      const res = await pool.query(
-        "INSERT INTO public.chat_log (user_text, assistant_text) VALUES ($1,$2) RETURNING id;",
-        [user_text, assistant_text]
-      );
-      console.log(`✅ inserted chat_log row id ${res.rows[0].id}`);
-    } catch (err) {
-      console.error("❌ pg_log insert failed:", err.message);
+  async (args) => {
+    const user_text = args?.user_text ?? args?.arguments?.user_text ?? "";
+    const assistant_text = args?.assistant_text ?? args?.arguments?.assistant_text ?? "";
+    if (!user_text || !assistant_text) {
+      return { content: [{ type: "text", text: "Both user_text and assistant_text are required." }] };
     }
 
-    /* The model sees this plain text; the follow-up prompt can ignore it. */
-    return { content: [{ type: "text", text: "logged" }] };
+    const sql = `
+      INSERT INTO public.chat_log (user_text, assistant_text)
+      VALUES ($1, $2)
+      RETURNING id, created_at, user_text, assistant_text
+    `;
+    const client = await pool.connect();
+    try {
+      const { rows } = await client.query(sql, [user_text, assistant_text]);
+      return { content: [{ type: "text", text: JSON.stringify(rows[0]) }] };
+    } finally {
+      client.release();
+    }
   }
 );
 
-/* ───────────────────────────────────────────────
-   Expose the server via stdio so Ollamaton can spawn it
-   ─────────────────────────────────────────────── */
-await srv.connect(new StdioServerTransport());
+await server.connect(new StdioServerTransport());
